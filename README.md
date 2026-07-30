@@ -70,8 +70,8 @@
 > *Getting Started*
 
 ```bash
-git clone https://github.com/fuxing0910-hue/clawslap.git
-cd clawslap
+git clone https://github.com/fuxing0910-hue/ClawSlap-mack-your-screen.-Feel-better.git
+cd ClawSlap-mack-your-screen.-Feel-better
 npm install
 npm start
 ```
