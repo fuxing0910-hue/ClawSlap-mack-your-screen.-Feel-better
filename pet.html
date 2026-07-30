@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+	* { margin:0; padding:0; box-sizing:border-box; }
+	html, body {
+		width:140px; height:140px; overflow:hidden;
+		background:transparent;
+		user-select:none;
+		cursor:default;
+	}
+	canvas { display:block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="140" height="140"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// ── Pet state ──────────────────────────────────────────────────────────────────
+let swell = 0, status = 'idle', scale = 1, t = 0;
+let slapCount = 0, slapWindow = 0;
+let shakeX = 0, shakeY = 0;
+let bubble = null;
+let totalSlaps = 0;
+let sootheStreak = 0;
+let lastInteraction = 0;
+let yawnCooldown = 0;
+
+// ── Pet SVGs ───────────────────────────────────────────────────────────────────
+const PET_IDLE = 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+	<ellipse cx="32" cy="36" rx="20" ry="16" fill="#e8753a"/>
+	<ellipse cx="32" cy="36" rx="16" ry="12" fill="#f4946c"/>
+	<circle cx="32" cy="28" r="10" fill="#e8753a"/>
+	<circle cx="28" cy="26" r="3" fill="#222"/>
+	<circle cx="36" cy="26" r="3" fill="#222"/>
+	<circle cx="28" cy="25" r="1.2" fill="#fff"/>
+	<circle cx="36" cy="25" r="1.2" fill="#fff"/>
+	<ellipse cx="32" cy="36" rx="5" ry="3" fill="#222"/>
+	<line x1="16" y1="28" x2="8" y2="24" stroke="#e8753a" stroke-width="3" stroke-linecap="round"/>
+	<line x1="16" y1="36" x2="8" y2="40" stroke="#e8753a" stroke-width="3" stroke-linecap="round"/>
+	<line x1="48" y1="28" x2="56" y2="24" stroke="#e8753a" stroke-width="3" stroke-linecap="round"/>
+	<line x1="48" y1="36" x2="56" y2="40" stroke="#e8753a" stroke-width="3" stroke-linecap="round"/>
+	<circle cx="8" cy="22" r="5" fill="#e8753a"/>
+	<circle cx="8" cy="42" r="5" fill="#e8753a"/>
+	<circle cx="56" cy="22" r="5" fill="#e8753a"/>
+	<circle cx="56" cy="42" r="5" fill="#e8753a"/>
+</svg>`);
+
+const PET_ANGRY = 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+	<ellipse cx="32" cy="36" rx="22" ry="18" fill="#d43a2a"/>
+	<ellipse cx="32" cy="36" rx="18" ry="14" fill="#e85545"/>
+	<circle cx="32" cy="28" r="12" fill="#d43a2a"/>
+	<line x1="25" y1="24" x2="30" y2="28" stroke="#222" stroke-width="3"/>
+	<line x1="39" y1="24" x2="34" y2="28" stroke="#222" stroke-width="3"/>
+	<ellipse cx="32" cy="38" rx="4" ry="2.5" fill="#222"/>
+	<line x1="14" y1="26" x2="6" y2="22" stroke="#d43a2a" stroke-width="3" stroke-linecap="round"/>
+	<line x1="14" y1="36" x2="6" y2="40" stroke="#d43a2a" stroke-width="3" stroke-linecap="round"/>
+	<line x1="50" y1="26" x2="58" y2="22" stroke="#d43a2a" stroke-width="3" stroke-linecap="round"/>
+	<line x1="50" y1="36" x2="58" y2="40" stroke="#d43a2a" stroke-width="3" stroke-linecap="round"/>
+	<circle cx="6" cy="20" r="6" fill="#d43a2a"/>
+	<circle cx="6" cy="42" r="6" fill="#d43a2a"/>
+	<circle cx="58" cy="20" r="6" fill="#d43a2a"/>
+	<circle cx="58" cy="42" r="6" fill="#d43a2a"/>
+</svg>`);
+
+const PET_SWELL = 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-6 0 76 64">
+	<ellipse cx="32" cy="36" rx="24" ry="20" fill="#e8753a"/>
+	<ellipse cx="32" cy="36" rx="20" ry="16" fill="#f4946c"/>
+	<circle cx="32" cy="28" r="14" fill="#e8753a"/>
+	<circle cx="27" cy="25" r="3.5" fill="#222"/>
+	<circle cx="37" cy="25" r="3.5" fill="#222"/>
+	<text x="27" y="27" font-size="5" fill="#fff">x</text>
+	<text x="37" y="27" font-size="5" fill="#fff">x</text>
+	<ellipse cx="32" cy="37" rx="5" ry="3" fill="#222"/>
+	<line x1="12" y1="28" x2="4" y2="24" stroke="#e8753a" stroke-width="4" stroke-linecap="round"/>
+	<line x1="12" y1="38" x2="4" y2="42" stroke="#e8753a" stroke-width="4" stroke-linecap="round"/>
+	<line x1="52" y1="28" x2="60" y2="24" stroke="#e8753a" stroke-width="4" stroke-linecap="round"/>
+	<line x1="52" y1="38" x2="60" y2="42" stroke="#e8753a" stroke-width="4" stroke-linecap="round"/>
+	<circle cx="4" cy="22" r="7" fill="#e8753a"/>
+	<circle cx="4" cy="44" r="7" fill="#e8753a"/>
+	<circle cx="60" cy="22" r="7" fill="#e8753a"/>
+	<circle cx="60" cy="44" r="7" fill="#e8753a"/>
+</svg>`);
+
+const PET_HAPPY = 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+	<ellipse cx="32" cy="36" rx="20" ry="16" fill="#e8753a"/>
+	<ellipse cx="32" cy="36" rx="16" ry="12" fill="#f4946c"/>
+	<circle cx="32" cy="28" r="10" fill="#e8753a"/>
+	<polyline points="22,23 27,28 22,33" stroke="#222" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+	<polyline points="42,23 37,28 42,33" stroke="#222" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+	<polyline points="29,34 32,38 35,34" stroke="#222" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+	<circle cx="21" cy="32" r="4" fill="#ffaaaa" opacity="0.35"/>
+	<circle cx="43" cy="32" r="4" fill="#ffaaaa" opacity="0.35"/>
+	<line x1="16" y1="28" x2="8" y2="24" stroke="#e8753a" stroke-width="3" stroke-linecap="round"/>
+	<line x1="16" y1="36" x2="8" y2="40" stroke="#e8753a" stroke-width="3" stroke-linecap="round"/>
+	<line x1="48" y1="28" x2="56" y2="24" stroke="#e8753a" stroke-width="3" stroke-linecap="round"/>
+	<line x1="48" y1="36" x2="56" y2="40" stroke="#e8753a" stroke-width="3" stroke-linecap="round"/>
+	<circle cx="8" cy="22" r="5" fill="#e8753a"/>
+	<circle cx="8" cy="42" r="5" fill="#e8753a"/>
+	<circle cx="56" cy="22" r="5" fill="#e8753a"/>
+	<circle cx="56" cy="42" r="5" fill="#e8753a"/>
+</svg>`);
+
+const PET_YAWN = 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+	<ellipse cx="32" cy="36" rx="20" ry="16" fill="#e8753a"/>
+	<ellipse cx="32" cy="36" rx="16" ry="12" fill="#f4946c"/>
+	<circle cx="32" cy="28" r="10" fill="#e8753a"/>
+	<line x1="24" y1="25" x2="32" y2="25" stroke="#222" stroke-width="3" stroke-linecap="round"/>
+	<line x1="36" y1="25" x2="44" y2="25" stroke="#222" stroke-width="3" stroke-linecap="round"/>
+	<ellipse cx="32" cy="35" rx="7" ry="6" fill="#222"/>
+	<ellipse cx="32" cy="33" rx="5" ry="3" fill="#d43a2a"/>
+	<ellipse cx="22" cy="31" rx="2" ry="3" fill="#7bb3ff"/>
+	<line x1="16" y1="28" x2="8" y2="24" stroke="#e8753a" stroke-width="3" stroke-linecap="round"/>
+	<line x1="16" y1="36" x2="8" y2="40" stroke="#e8753a" stroke-width="3" stroke-linecap="round"/>
+	<line x1="48" y1="28" x2="56" y2="24" stroke="#e8753a" stroke-width="3" stroke-linecap="round"/>
+	<line x1="48" y1="36" x2="56" y2="40" stroke="#e8753a" stroke-width="3" stroke-linecap="round"/>
+	<circle cx="8" cy="22" r="5" fill="#e8753a"/>
+	<circle cx="8" cy="42" r="5" fill="#e8753a"/>
+	<circle cx="56" cy="22" r="5" fill="#e8753a"/>
+	<circle cx="56" cy="42" r="5" fill="#e8753a"/>
+</svg>`);
+
+const petImages = {};
+function loadPetImages() {
+	petImages.idle = new Image(); petImages.idle.src = PET_IDLE;
+	petImages.angry = new Image(); petImages.angry.src = PET_ANGRY;
+	petImages.swell = new Image(); petImages.swell.src = PET_SWELL;
+	petImages.happy = new Image(); petImages.happy.src = PET_HAPPY;
+	petImages.yawn = new Image(); petImages.yawn.src = PET_YAWN;
+}
+loadPetImages();
+
+function getPetImg() {
+	if (status === 'angry') return petImages.angry;
+	if (status === 'happy') return petImages.happy;
+	if (status === 'yawn') return petImages.yawn;
+	if (swell >= 2) return petImages.swell;
+	return petImages.idle;
+}
+
+const BANDAID_SVG = 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+	<rect x="1" y="5" width="18" height="10" rx="3" fill="#f5deb3" stroke="#c4a46c" stroke-width="1"/>
+	<rect x="7" y="4" width="6" height="12" rx="2" fill="#e8d5a0" stroke="#c4a46c" stroke-width="0.8"/>
+	<circle cx="8" cy="10" r="0.8" fill="#c4a46c"/>
+	<circle cx="12" cy="10" r="0.8" fill="#c4a46c"/>
+	<circle cx="10" cy="8" r="0.8" fill="#c4a46c"/>
+	<circle cx="10" cy="12" r="0.8" fill="#c4a46c"/>
+</svg>`);
+let bandaidImg = null;
+function loadBandaidImg() {
+	bandaidImg = new Image(); bandaidImg.src = BANDAID_SVG;
+}
+loadBandaidImg();
+
+const BUBBLE_TEXTS = {
+	slapped: ['TAT','T T','OW!','WAH!','OOF!','WHY?!'],
+	swollen: ['so puffy...','QAQ','uwahh','nooo'],
+	angry: ['ENOUGH!','(╬▔皿▔)╯','GRRR!','STOP!!'],
+	soothed: ['purrr~','hehe','❤','=w=','oki'],
+	happy: ['yay!','hehe','❤','=w=','purrr~'],
+	idle: ['heyo!','🦀','zzz...','o.o','clack clack'],
+	yawn: ['*yawn*','zzz...','zzzZZZ','hoooh...','💤'],
+};
+
+function showBubble(st) {
+	const txts = BUBBLE_TEXTS[st] || BUBBLE_TEXTS.idle;
+	bubble = { txt: txts[Math.floor(Math.random() * txts.length)], t: performance.now(), duration: 2000 };
+}
+
+// ── Slap reaction ──────────────────────────────────────────────────────────────
+function onSlap() {
+	const now = performance.now();
+	lastInteraction = now;
+	if (now - slapWindow > 10000) { slapCount = 0; slapWindow = now; }
+	slapCount++;
+	totalSlaps++;
+	swell = Math.min(5, swell + 1);
+	scale = 1 + swell * 0.045;
+	if (slapCount >= 6) status = 'angry';
+	else if (slapCount >= 3) status = 'swollen';
+	else status = 'slapped';
+	showBubble(status === 'angry' ? 'angry' : status === 'swollen' ? 'swollen' : 'slapped');
+	shakeX = 12; shakeY = 6;
+	sootheStreak = 0;
+}
+
+// ── Soothe ─────────────────────────────────────────────────────────────────────
+let _sootheTimer = null;
+function onSoothe() {
+	lastInteraction = performance.now();
+	swell = Math.max(0, swell - 1);
+	scale = 1 + swell * 0.045;
+	sootheStreak++;
+	if (sootheStreak >= 2) {
+		totalSlaps = 0;
+		slapCount = 0;
+		swell = 0;
+		scale = 1;
+		sootheStreak = 0;
+	}
+	if (swell <= 0) { status = 'happy'; slapCount = 0; }
+	else if (swell <= 2) status = 'swollen';
+	showBubble('soothed');
+	if (window.clawslap) window.clawslap.recordSoothe();
+	clearTimeout(_sootheTimer);
+	_sootheTimer = setTimeout(() => {
+		if (status === 'happy') status = 'idle';
+	}, 1000);
+}
+
+// ── IPC ────────────────────────────────────────────────────────────────────────
+if (window.clawslap) {
+	window.clawslap.onSlap(() => onSlap());
+	window.clawslap.onSoothe(() => onSoothe());
+	window.clawslap.onState((s) => {
+		if (s.pet) {
+			swell = s.pet.swell || 0;
+			status = s.pet.status || 'idle';
+			scale = 1 + swell * 0.045;
+		}
+	});
+}
+
+// ── Right-click → stats ─────────────────────────────────────────────────────
+canvas.addEventListener('contextmenu', (e) => {
+	e.preventDefault();
+	if (window.clawslap) window.clawslap.openStats();
+});
+
+// ── Touch interaction ──────────────────────────────────────────────────────
+let trail = [];
+let trailDist = 0;
+const TRAIL_MAX = 20;
+const SOOTHE_DIST = 140;
+
+function isNearCrab(mx, my) {
+	return Math.hypot(mx - 70, my - 70) < 35;
+}
+
+canvas.addEventListener('mousemove', (e) => {
+	if (dragging) {
+		const dx = e.screenX - dragStartX;
+		const dy = e.screenY - dragStartY;
+		dragStartX = e.screenX;
+		dragStartY = e.screenY;
+		if (window.clawslap) window.clawslap.movePet(dx, dy);
+		return;
+	}
+
+	const mx = e.offsetX, my = e.offsetY;
+	const over = isNearCrab(mx, my);
+	document.body.style.cursor = over ? 'grab' : 'default';
+
+	if (!over) { trail = []; trailDist = 0; return; }
+
+	const now = performance.now();
+	if (trail.length > 0) {
+		const prev = trail[trail.length - 1];
+		const dt = now - prev.t;
+		if (dt < 1000) {
+			const d = Math.hypot(mx - prev.x, my - prev.y);
+			const speed = d / Math.max(dt, 1);
+			trailDist += d * Math.min(speed / 0.5, 2.0);
+		}
+	}
+	trail.push({ x: mx, y: my, t: now });
+	if (trail.length > TRAIL_MAX) trail.shift();
+
+	if (trailDist >= SOOTHE_DIST) {
+		trailDist = 0; trail = [];
+		onSoothe();
+	}
+	clearTimeout(trail._decay);
+	trail._decay = setTimeout(() => { trailDist = Math.max(0, trailDist * 0.3); }, 400);
+});
+
+// ── Long-press drag ──────────────────────────────────────────────────────────
+let dragTimeout = null;
+let dragging = false;
+let dragStartX = 0, dragStartY = 0;
+
+canvas.addEventListener('mousedown', (e) => {
+	if (e.button !== 0) return;
+	if (!isNearCrab(e.offsetX, e.offsetY)) return;
+	dragStartX = e.screenX;
+	dragStartY = e.screenY;
+	dragging = false;
+	dragTimeout = setTimeout(() => {
+		dragging = true;
+		document.body.style.cursor = 'grabbing';
+	}, 80);
+});
+
+window.addEventListener('mouseup', () => {
+	clearTimeout(dragTimeout);
+	dragging = false;
+	document.body.style.cursor = 'default';
+});
+
+// ── Auto-recovery + Yawn ─────────────────────────────────────────────────────
+setInterval(() => {
+	const idleTime = performance.now() - lastInteraction;
+	const sinceLastYawn = performance.now() - yawnCooldown;
+	if (idleTime > 25000 && sinceLastYawn > 60000 && swell <= 0 && status !== 'yawn' && status !== 'happy' && status !== 'angry') {
+		status = 'yawn';
+		showBubble('yawn');
+		setTimeout(() => { if (status === 'yawn') { status = 'idle'; yawnCooldown = performance.now(); } }, 2500);
+	}
+
+	if (swell > 0 && performance.now() - slapWindow > 8000 && status !== 'happy') {
+		swell = Math.max(0, swell - 1);
+		scale = 1 + swell * 0.045;
+		if (swell <= 0) { status = 'happy'; slapCount = 0; }
+		else if (swell <= 2) status = 'swollen';
+	}
+	clearTimeout(_sootheTimer);
+	_sootheTimer = setTimeout(() => { if (status === 'happy') status = 'idle'; }, 1000);
+}, 2000);
+
+lastInteraction = performance.now();
+
+// ── Render loop ────────────────────────────────────────────────────────────────
+function draw(timestamp) {
+	ctx.clearRect(0, 0, 140, 140);
+
+	t = timestamp;
+	const idleBob = Math.sin(t * 0.002) * 2;
+	const angryShake = status === 'angry' ? Math.sin(t * 0.03) * 2 : 0;
+
+	shakeX *= 0.85;
+	shakeY *= 0.85;
+	if (Math.abs(shakeX) < 0.1) shakeX = 0;
+	if (Math.abs(shakeY) < 0.1) shakeY = 0;
+
+	const cx = 70 + angryShake + shakeX;
+	const cy = 70 + idleBob + shakeY;
+
+	const pImg = getPetImg();
+	if (pImg && pImg.complete) {
+		ctx.save();
+		ctx.translate(cx, cy);
+		ctx.scale(scale, scale);
+		ctx.drawImage(pImg, -32, -32, 64, 64);
+		ctx.restore();
+	}
+
+	if (totalSlaps >= 5 && status !== 'angry' && status !== 'happy' && status !== 'yawn' && bandaidImg && bandaidImg.complete) {
+		ctx.save();
+		ctx.translate(cx, cy);
+		ctx.scale(scale, scale);
+		ctx.rotate(0.52);
+		ctx.drawImage(bandaidImg, 4, -11, 12, 12);
+		ctx.restore();
+	}
+
+	if (bubble) {
+		const age = timestamp - bubble.t;
+		if (age < bubble.duration) {
+			const bx = cx - 40, by = cy - 25;
+			const fade = age < 300 ? age / 300 : age > bubble.duration - 300 ? (bubble.duration - age) / 300 : 1;
+			ctx.save();
+			ctx.globalAlpha = fade;
+			ctx.fillStyle = '#fff';
+			ctx.strokeStyle = '#ddd';
+			ctx.lineWidth = 1;
+			ctx.beginPath();
+			ctx.moveTo(bx - 6 + 10, by - 14);
+			ctx.lineTo(bx + 74 - 10, by - 14);
+			ctx.quadraticCurveTo(bx + 74, by - 14, bx + 74, by - 14 + 10);
+			ctx.lineTo(bx + 74, by + 6 - 10);
+			ctx.quadraticCurveTo(bx + 74, by + 6, bx + 74 - 10, by + 6);
+			ctx.lineTo(bx - 6 + 10, by + 6);
+			ctx.quadraticCurveTo(bx - 6, by + 6, bx - 6, by + 6 - 10);
+			ctx.lineTo(bx - 6, by - 14 + 10);
+			ctx.quadraticCurveTo(bx - 6, by - 14, bx - 6 + 10, by - 14);
+			ctx.closePath();
+			ctx.fill();
+			ctx.stroke();
+			ctx.fillStyle = '#333';
+			ctx.font = '12px "Microsoft YaHei", sans-serif';
+			ctx.textAlign = 'center';
+			ctx.fillText(bubble.txt, bx + 34, by - 2);
+			ctx.restore();
+		} else { bubble = null; }
+	}
+
+	requestAnimationFrame(draw);
+}
+
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "clawslap",
+  "version": "1.0.0",
+  "description": "扇巴掌特效 + 像素宠物 — 透明悬浮窗覆盖整个桌面，横扫键盘触发",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "dependencies": {
+    "koffi": "^2.9.0"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11"
+  }
+}

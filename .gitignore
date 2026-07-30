@@ -1,0 +1,9 @@
+node_modules/
+out/
+*.vsix
+# Stats data — local only, don't commit personal data
+clawslap-stats.json
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini

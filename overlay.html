@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:transparent; }
+  canvas { display:block; width:100%; height:100%; pointer-events:none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+let effects = [];
+let showStats = false, statsData = {};
+
+// ── Audio ────────────────────────────────────────────────────────────────────
+const AC = window.AudioContext || window.webkitAudioContext;
+function playSlapSound() {
+  try {
+    const ac = new AC();
+    const now = ac.currentTime;
+    const len = 0.15;
+    const buf = ac.createBuffer(1, ac.sampleRate * len, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (d.length * 0.3));
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const g = ac.createGain(); g.gain.setValueAtTime(0.6, now); g.gain.exponentialRampToValueAtTime(0.001, now + len);
+    const o = ac.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(80, now); o.frequency.exponentialRampToValueAtTime(20, now + len);
+    const g2 = ac.createGain(); g2.gain.setValueAtTime(0.8, now); g2.gain.exponentialRampToValueAtTime(0.001, now + len);
+    src.connect(g); g.connect(ac.destination);
+    o.connect(g2); g2.connect(ac.destination);
+    src.start(now); o.start(now); src.stop(now + len); o.stop(now + len);
+  } catch(_) {}
+}
+
+// ── Hand SVGs ───────────────────────────────────────────────────────────────
+// Open hand (SLAP)
+const HAND_OPEN = 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120">
+  <!-- palm -->
+  <rect x="20" y="30" width="60" height="55" rx="12" fill="#f5d5b8" stroke="#d4a080" stroke-width="2"/>
+  <!-- fingers -->
+  <rect x="24" y="6" width="14" height="30" rx="7" fill="#f5d5b8" stroke="#d4a080" stroke-width="1.5"/>
+  <rect x="40" y="2" width="14" height="34" rx="7" fill="#f5d5b8" stroke="#d4a080" stroke-width="1.5"/>
+  <rect x="56" y="6" width="14" height="30" rx="7" fill="#f5d5b8" stroke="#d4a080" stroke-width="1.5"/>
+  <rect x="72" y="14" width="14" height="26" rx="7" fill="#f5d5b8" stroke="#d4a080" stroke-width="1.5"/>
+  <!-- wrist -->
+  <rect x="28" y="82" width="44" height="20" rx="6" fill="#f5d5b8" stroke="#d4a080" stroke-width="1.5"/>
+  <!-- impact lines on palm -->
+  <line x1="35" y1="45" x2="65" y2="45" stroke="#e8b090" stroke-width="1.5"/>
+  <line x1="38" y1="52" x2="62" y2="52" stroke="#e8b090" stroke-width="1.5"/>
+</svg>`);
+
+// Fist / half-clenched hand (BAM)
+const HAND_FIST = 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120">
+  <!-- palm -->
+  <rect x="20" y="30" width="60" height="55" rx="12" fill="#f5d5b8" stroke="#d4a080" stroke-width="2"/>
+  <!-- fingers curled down -->
+  <rect x="22" y="18" width="14" height="20" rx="7" fill="#f5d5b8" stroke="#d4a080" stroke-width="1.5"/>
+  <rect x="38" y="16" width="14" height="22" rx="7" fill="#f5d5b8" stroke="#d4a080" stroke-width="1.5"/>
+  <rect x="54" y="18" width="14" height="20" rx="7" fill="#f5d5b8" stroke="#d4a080" stroke-width="1.5"/>
+  <rect x="70" y="22" width="14" height="18" rx="7" fill="#f5d5b8" stroke="#d4a080" stroke-width="1.5"/>
+  <!-- wrist -->
+  <rect x="28" y="82" width="44" height="20" rx="6" fill="#f5d5b8" stroke="#d4a080" stroke-width="1.5"/>
+  <!-- knuckle marks -->
+  <circle cx="32" cy="40" r="2" fill="#d4a080" opacity="0.6"/>
+  <circle cx="48" cy="40" r="2" fill="#d4a080" opacity="0.6"/>
+  <circle cx="64" cy="40" r="2" fill="#d4a080" opacity="0.6"/>
+</svg>`);
+
+// ── Effects ──────────────────────────────────────────────────────────────────
+function addEffect(type, x, y, extra) {
+  const t = performance.now();
+  if (type === 'hand') {
+    const dir = extra && extra.direction === 'left' ? -1 : 1;
+    const handType = extra.handType || 'open';
+    const instant = extra && extra.instant;
+    effects.push({ type:'hand', x, y, t, a:1, s: instant ? 0.8 : 0.6,
+      startX: instant ? x : (dir > 0 ? x - 150 : x + 150),
+      startY: instant ? y : y - 130,
+      dir, handType, instant: !!instant });
+  }
+  else if (type === 'ring') effects.push({ type:'ring', x, y, t, r:20, a:0.8 });
+  else if (type === 'flash') effects.push({ type:'flash', t, a:0.30 });
+  else if (type === 'text') {
+    // Text matches hand type: BAM for fist, SLAP for open
+    const isFist = extra && extra.handType === 'fist';
+    const txts = isFist
+      ? ['BAM!💥','💥💥','WHACK!💥','POW!💥','THWACK!💥','CRACK!💥']
+      : ['SLAP!👋','👋👋','PAP!👋','SMACK!👋','WHAP!👋','POW!👋'];
+    effects.push({ type:'text', x:x + (Math.random()-0.5)*50, y:y + (Math.random()-0.5)*25, t, a:1,
+      txt: txts[Math.floor(Math.random() * txts.length)], s: 40 + Math.random()*30 });
+  }
+}
+
+// ── Resize ───────────────────────────────────────────────────────────────────
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── IPC ──────────────────────────────────────────────────────────────────────
+if (window.clawslap) {
+  window.clawslap.onSlap((data) => {
+    // Use cursor position if provided, else random center-ish with offset
+    let cx, cy;
+    if (data && data.x != null && data.y != null) {
+      cx = data.x + (Math.random() - 0.5) * 16;
+      cy = data.y + (Math.random() - 0.5) * 10;
+    } else {
+      cx = W * (0.3 + Math.random() * 0.4);
+      cy = H * (0.3 + Math.random() * 0.4);
+    }
+    const dir = data && data.direction ? data.direction : (Math.random() > 0.5 ? 'left' : 'right');
+    const instant = !!(data && data.instant);
+    // 85% open hand (SLAP), 15% fist (BAM) — much more SLAP
+    const isFist = Math.random() < 0.15;
+    addEffect('hand', cx, cy, { direction: dir, handType: isFist ? 'fist' : 'open', instant: instant });
+    addEffect('ring', cx, cy);
+    addEffect('flash', 0, 0);
+    // Text: always SLAP-group for instant
+    addEffect('text', cx, cy, { handType: instant ? 'open' : 'open' });
+    playSlapSound();
+  });
+  window.clawslap.onOpenStats(() => openStats());
+}
+
+// ── Stats ────────────────────────────────────────────────────────────────────
+function getStatsDays() {
+  const days = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    const dayData = statsData[key] || { slaps: [], soothes: [] };
+    days.push({
+      label: `${d.getMonth()+1}/${d.getDate()}`,
+      slaps: dayData.slaps.length,
+      soothes: dayData.soothes.length,
+      key
+    });
+  }
+  return days;
+}
+
+async function openStats() {
+  if (showStats) { showStats = false; return; }
+  if (window.clawslap) statsData = await window.clawslap.getStats();
+  showStats = true;
+}
+
+function drawStats() {
+  if (!showStats) return;
+  const days = getStatsDays();
+  const maxVal = Math.max(1, ...days.map(d => Math.max(d.slaps, d.soothes)));
+
+  const pw = 960, ph = 620;
+  const px = (W - pw) / 2, py = (H - ph) / 2;
+  ctx.fillStyle = 'rgba(20,20,40,0.94)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 2;
+  roundRect(px, py, pw, ph, 16, true, true);
+
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 20px "Microsoft YaHei", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('30-Day Stats', px + pw/2, py + 35);
+
+  // ── 30-day bar chart with Y-axis ──────────────────────────────────────────
+  const axisLeft = px + 50;
+  const chartRight = px + pw - 30;
+  const chartY = py + 250, chartH = 140;
+  const chartW = chartRight - axisLeft;
+
+  const barW = 10, gap = 4;
+  const groupW = barW * 2 + 2; // two bars + tiny gap between them
+  const totalBW = days.length * (groupW + gap) - gap;
+  const startX = axisLeft + (chartW - totalBW) / 2;
+
+  // Y-axis ticks
+  const tickCount = 5;
+  const tickStep = Math.ceil(maxVal / (tickCount - 1)) || 1;
+  ctx.fillStyle = '#888';
+  ctx.font = '10px "Microsoft YaHei", sans-serif';
+  ctx.textAlign = 'right';
+  for (let i = 0; i < tickCount; i++) {
+    const val = i * tickStep;
+    const ty = chartY - (val / maxVal) * chartH;
+    ctx.fillText(val + '', axisLeft - 6, ty + 4);
+    // Grid line
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.beginPath();
+    ctx.moveTo(axisLeft, ty);
+    ctx.lineTo(chartRight, ty);
+    ctx.stroke();
+  }
+  // Y-axis line
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(axisLeft, chartY - chartH);
+  ctx.lineTo(axisLeft, chartY);
+  ctx.stroke();
+  // X-axis line
+  ctx.beginPath();
+  ctx.moveTo(axisLeft, chartY);
+  ctx.lineTo(chartRight, chartY);
+  ctx.stroke();
+
+  // Draw bars
+  days.forEach((day, i) => {
+    const bx = startX + i * (groupW + gap);
+    const slapH = (day.slaps / maxVal) * chartH;
+    const sootheH = (day.soothes / maxVal) * chartH;
+
+    ctx.fillStyle = '#e85545';
+    roundRect(bx, chartY - slapH, barW, slapH, 3, true, false);
+
+    ctx.fillStyle = '#4caf93';
+    roundRect(bx + barW + 2, chartY - sootheH, barW, sootheH, 3, true, false);
+
+    if (i % 5 === 0 || i === days.length - 1) {
+      ctx.fillStyle = '#aaa';
+      ctx.font = '10px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(day.label, bx + barW + 1, chartY + 14);
+    }
+  });
+
+  // Legend for 30-day chart
+  const lx = px + pw/2 - 70, ly = chartY + 28;
+  ctx.fillStyle = '#e85545'; ctx.fillRect(lx, ly, 11, 11);
+  ctx.fillStyle = '#fff'; ctx.font = '12px "Microsoft YaHei", sans-serif';
+  ctx.textAlign = 'left'; ctx.fillText('Slaps', lx + 16, ly + 10);
+  ctx.fillStyle = '#4caf93'; ctx.fillRect(lx + 75, ly, 11, 11);
+  ctx.fillText('Soothes', lx + 91, ly + 10);
+
+  // ── 30-day per-app combined chart (Slaps + Soothes) ──────────────────────
+  const appSectionY = ly + 30;
+  ctx.fillStyle = '#e0e0e0';
+  ctx.font = 'bold 14px "Microsoft YaHei", sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('30-Day Per-App (👋 Slaps + 🤚 Soothes)', axisLeft, appSectionY + 16);
+
+  // Aggregate all 30 days by app — both slaps and soothes
+  const app30Map = {};
+  let total30Slaps = 0, total30Soothes = 0;
+  days.forEach(day => {
+    const dayData = statsData[day.key];
+    if (!dayData) return;
+    (dayData.slaps || []).forEach(s => {
+      app30Map[s.app] = app30Map[s.app] || { slaps: 0, soothes: 0 };
+      app30Map[s.app].slaps++;
+      total30Slaps++;
+    });
+    (dayData.soothes || []).forEach(s => {
+      app30Map[s.app] = app30Map[s.app] || { slaps: 0, soothes: 0 };
+      app30Map[s.app].soothes++;
+      total30Soothes++;
+    });
+  });
+  const appList = Object.entries(app30Map).sort((a, b) => (b[1].slaps + b[1].soothes) - (a[1].slaps + a[1].soothes));
+  const appMax = Math.max(1, ...appList.map(a => Math.max(a[1].slaps, a[1].soothes)));
+
+  // Small legend for this section
+  ctx.fillStyle = '#e85545'; ctx.fillRect(chartRight - 155, appSectionY - 2, 10, 10);
+  ctx.fillStyle = '#ccc'; ctx.font = '11px "Microsoft YaHei", sans-serif';
+  ctx.textAlign = 'left'; ctx.fillText('Slaps', chartRight - 141, appSectionY + 7);
+  ctx.fillStyle = '#4caf93'; ctx.fillRect(chartRight - 75, appSectionY - 2, 10, 10);
+  ctx.fillText('Soothes', chartRight - 61, appSectionY + 7);
+
+  if (appList.length > 0) {
+    const hBarY0 = appSectionY + 26;
+    const hBarH = 10;
+    const hBarGap = 5;
+    const labelW = 80, barGapW = 4;
+    const hBarAreaW = chartRight - axisLeft - labelW - 110;
+    const maxBars = Math.min(appList.length, 14);
+
+    for (let i = 0; i < maxBars; i++) {
+      const [appName, counts] = appList[i];
+      const rowY = hBarY0 + i * (hBarH * 2 + hBarGap);
+      const slapLen = (counts.slaps / appMax) * hBarAreaW;
+      const sootheLen = (counts.soothes / appMax) * hBarAreaW;
+
+      // App name
+      ctx.fillStyle = '#ccc';
+      ctx.font = '11px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(appName, axisLeft + labelW, rowY + hBarH - 1);
+
+      // Slaps bar (top)
+      if (counts.slaps > 0) {
+        const slapGrad = ctx.createLinearGradient(axisLeft + labelW + 6, 0, axisLeft + labelW + 6 + hBarAreaW, 0);
+        slapGrad.addColorStop(0, '#e85545');
+        slapGrad.addColorStop(1, '#ff8a65');
+        ctx.fillStyle = slapGrad;
+        roundRect(axisLeft + labelW + 6, rowY, slapLen, hBarH, 3, true, false);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(counts.slaps + '', axisLeft + labelW + 6 + slapLen + 4, rowY + hBarH - 2);
+      }
+
+      // Soothes bar (bottom)
+      if (counts.soothes > 0) {
+        const sootheGrad = ctx.createLinearGradient(axisLeft + labelW + 6, 0, axisLeft + labelW + 6 + hBarAreaW, 0);
+        sootheGrad.addColorStop(0, '#4caf93');
+        sootheGrad.addColorStop(1, '#81d4b0');
+        ctx.fillStyle = sootheGrad;
+        roundRect(axisLeft + labelW + 6, rowY + hBarH + 2, sootheLen, hBarH, 3, true, false);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(counts.soothes + '', axisLeft + labelW + 6 + sootheLen + 4, rowY + hBarH * 2 - 1);
+      }
+    }
+
+    // Summary
+    const totalY = hBarY0 + maxBars * (hBarH * 2 + hBarGap) + 6;
+    ctx.fillStyle = '#888';
+    ctx.font = '12px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`Total: ${total30Slaps} slaps + ${total30Soothes} soothes across ${appList.length} apps`, axisLeft, totalY + 10);
+  } else {
+    ctx.fillStyle = '#666';
+    ctx.font = '13px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('No data yet — start slapping!', px + pw/2, appSectionY + 44);
+  }
+
+  ctx.fillStyle = '#555';
+  ctx.font = '11px "Microsoft YaHei", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Right-click the crab to open/close this panel | Click anywhere to close', px + pw/2, py + ph - 14);
+}
+
+canvas.addEventListener('click', (e) => {
+  if (showStats) { showStats = false; }
+});
+
+// ── Helper ───────────────────────────────────────────────────────────────────
+function roundRect(x, y, w, h, r, fill, stroke) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  if (fill) ctx.fill();
+  if (stroke) ctx.stroke();
+}
+
+// ── Render loop ──────────────────────────────────────────────────────────────
+let handOpenImg = null, handFistImg = null;
+function loadHandImages() {
+  handOpenImg = new Image(); handOpenImg.src = HAND_OPEN;
+  handFistImg = new Image(); handFistImg.src = HAND_FIST;
+}
+loadHandImages();
+
+function draw(t) {
+  ctx.clearRect(0, 0, W, H);
+
+  const now = performance.now();
+  let shook = false;
+
+  effects = effects.filter(e => {
+    const age = now - e.t;
+    if (e.type === 'hand') {
+      if (age > 700) return false;
+      const p = age / 700;
+      const instant = e.instant;
+      // Instant: pop at position, no swoop; Swoop: fly in from side+top
+      const swoopX = instant ? e.x : (e.startX + (e.x - e.startX) * Math.min(p * 3, 1));
+      const swoopY = instant ? e.y : (e.startY + (e.y - e.startY) * Math.min(p * 3, 1));
+      const sc = instant ? (0.5 + p * 1.0) : (0.3 + p * 1.2);
+      const rot = e.dir * (0.6 - p * 0.3);
+      e.a = p < 0.3 ? 1 : 1 - (p - 0.3) / 0.7;
+      ctx.save();
+      ctx.globalAlpha = e.a;
+      ctx.translate(swoopX, swoopY);
+      ctx.scale(sc, sc);
+      ctx.rotate(rot);
+      const img = e.handType === 'fist' ? handFistImg : handOpenImg;
+      if (img && img.complete) {
+        ctx.drawImage(img, -50, -60, 100, 120);
+      }
+      ctx.restore();
+      if (p < 0.4) shook = true;
+    } else if (e.type === 'ring') {
+      if (age > 800) return false;
+      const p = age / 800;
+      e.r = 20 + p * 350;
+      e.a = 0.8 * (1 - p);
+      ctx.save();
+      ctx.globalAlpha = e.a;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 3 * (1 - p);
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.lineWidth = 2 * (1 - p);
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r * 0.6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    } else if (e.type === 'flash') {
+      if (age > 400) return false;
+      e.a = 0.30 * (1 - age / 400);
+      ctx.fillStyle = `rgba(255,255,255,${e.a})`;
+      ctx.fillRect(0, 0, W, H);
+    } else if (e.type === 'text') {
+      if (age > 1500) return false;
+      const p = age / 1500;
+      e.a = 1 - p;
+      ctx.save();
+      ctx.globalAlpha = e.a;
+      ctx.fillStyle = '#ff4444';
+      ctx.font = `bold ${e.s}px "Microsoft YaHei", sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(e.txt, e.x, e.y - p * 60);
+      ctx.restore();
+    }
+    return true;
+  });
+
+  // Screen shake
+  if (shook) {
+    const activeHand = effects.filter(e => e.type === 'hand');
+    if (activeHand.length > 0) {
+      const age = now - activeHand[0].t;
+      if (age < 300) {
+        const intensity = (1 - age / 300) * 12;
+        // Shake happens naturally via the visual offset
+      }
+    }
+  }
+
+  drawStats();
+
+  requestAnimationFrame(draw);
+}
+
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
