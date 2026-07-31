@@ -3,7 +3,8 @@ out/
 *.vsix
 # Stats data — local only, don't commit personal data
 clawslap-stats.json
-# OS files
+# Build output
+dist/
 .DS_Store
 Thumbs.db
 desktop.ini
